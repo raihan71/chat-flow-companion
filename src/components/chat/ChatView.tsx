@@ -300,7 +300,7 @@ export function ChatView({
             <PromptInputFooter className="justify-between">
               <span className="pl-1 text-[11px] text-muted-foreground">{modeLabel}</span>
               <PromptInputSubmit
-                status={pending ? "submitted" : undefined}
+                {...(pending ? { status: "submitted" as const } : {})}
                 disabled={pending || !input.trim()}
               />
             </PromptInputFooter>
