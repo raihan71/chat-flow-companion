@@ -1,4 +1,10 @@
-import { getSettings, isTestWebhook, parseExtraHeaders, type ChatSettings } from "./chat-settings";
+import { createServerFn } from "@tanstack/react-start";
+import {
+  getSettings,
+  isTestWebhook,
+  parseExtraHeaders,
+  type ChatSettings,
+} from "./chat-settings";
 
 export type WebhookPayload = {
   message: string;
@@ -13,6 +19,93 @@ export type WebhookFailure = {
   /** Extra guidance shown in the inline banner, e.g. how to arm an n8n test webhook. */
   hint?: string;
 };
+
+/**
+ * Server-side function to handle the webhook request.
+ * This reads credentials from environment variables if they are not provided by the client.
+ */
+const sendToWebhookServer = createServerFn({ method: "POST" })
+  .validator((data: { payload: WebhookPayload; settings: ChatSettings }) => data)
+  .handler(async ({ data: { payload, settings } }) => {
+    // Priority: Environment variables > Client Settings > Hardcoded defaults
+    const envUrl = process.env.N8N_WEBHOOK_URL;
+    const envUser = process.env.N8N_WEBHOOK_USERNAME;
+    const envPass = process.env.N8N_WEBHOOK_PASSWORD;
+
+    const url = (envUrl || settings.webhookUrl || "").trim();
+
+    if (!url) {
+      return {
+        ok: false as const,
+        failure: {
+          title: "No webhook configured",
+          detail: "Server-side N8N_WEBHOOK_URL is missing and no client URL provided.",
+          hint: "Set N8N_WEBHOOK_URL in your environment variables.",
+        },
+      };
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...parseExtraHeaders(settings),
+    };
+
+    // Apply Basic Auth from env if available, otherwise use client settings
+    const username = envUser || settings.basicAuthUsername;
+    const password = envPass || settings.basicAuthPassword;
+
+    if (username || password) {
+      const auth = Buffer.from(`${username}:${password}`).toString("base64");
+      headers["Authorization"] = `Basic ${auth}`;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      const raw = await response.text();
+
+      if (!response.ok) {
+        return {
+          ok: false as const,
+          failure: describeHttpFailure(response.status, raw, { ...settings, webhookUrl: url }),
+        };
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = raw ? JSON.parse(raw) : "";
+      } catch {
+        parsed = raw;
+      }
+
+      const reply = extractReply(parsed);
+      if (!reply) {
+        return {
+          ok: false as const,
+          failure: {
+            title: "The workflow replied with no text",
+            detail: raw ? `Raw response: ${raw.slice(0, 300)}` : "The response body was empty.",
+            hint: 'Make the last node return something like { "message": { "content": "..." } } or { "output": "..." }.',
+          },
+        };
+      }
+
+      return { ok: true as const, reply };
+    } catch (error) {
+      return {
+        ok: false as const,
+        failure: {
+          title: "Couldn't reach the webhook",
+          detail: error instanceof Error ? error.message : String(error),
+          hint: "Check the server's connection to the n8n instance.",
+        },
+      };
+    }
+  });
 
 const TEXT_KEYS = ["output", "text", "response", "message", "content", "answer", "reply", "result"];
 
@@ -109,62 +202,25 @@ export async function sendToWebhook(
   signal?: AbortSignal,
 ): Promise<{ ok: true; reply: string } | { ok: false; failure: WebhookFailure }> {
   const settings = getSettings();
-  const url = settings.webhookUrl.trim();
 
-  if (!url) {
-    return {
-      ok: false,
-      failure: {
-        title: "No webhook configured",
-        detail: "Add your n8n webhook URL before sending a message.",
-        hint: "Open Settings and paste the webhook URL.",
-      },
-    };
-  }
-
-  let response: Response;
+  // We delegate to the server function to keep credentials on the server
   try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...parseExtraHeaders(settings) },
-      body: JSON.stringify(payload),
-      ...(signal ? { signal } : {}),
+    const result = await sendToWebhookServer({
+      data: {
+        payload,
+        settings,
+      },
+      signal,
     });
+    return result;
   } catch (error) {
     return {
       ok: false,
       failure: {
-        title: "Couldn't reach the webhook",
+        title: "Server Error",
         detail: error instanceof Error ? error.message : String(error),
-        hint: "Check the URL, your connection, and that the n8n instance allows requests from this site (CORS).",
+        hint: "The server function failed to execute.",
       },
     };
   }
-
-  const raw = await response.text();
-
-  if (!response.ok) {
-    return { ok: false, failure: describeHttpFailure(response.status, raw, settings) };
-  }
-
-  let parsed: unknown = raw;
-  try {
-    parsed = raw ? JSON.parse(raw) : "";
-  } catch {
-    parsed = raw;
-  }
-
-  const reply = extractReply(parsed);
-  if (!reply) {
-    return {
-      ok: false,
-      failure: {
-        title: "The workflow replied with no text",
-        detail: raw ? `Raw response: ${raw.slice(0, 300)}` : "The response body was empty.",
-        hint: 'Make the last node return something like { "message": { "content": "..." } } or { "output": "..." }.',
-      },
-    };
-  }
-
-  return { ok: true, reply };
 }

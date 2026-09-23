@@ -89,9 +89,7 @@ export function SettingsDialog({
               <Button
                 type="button"
                 size="sm"
-                variant={
-                  draft.webhookUrl === DEFAULT_PROD_WEBHOOK ? "default" : "outline"
-                }
+                variant={draft.webhookUrl === DEFAULT_PROD_WEBHOOK ? "default" : "outline"}
                 onClick={() => setDraft({ ...draft, webhookUrl: DEFAULT_PROD_WEBHOOK })}
               >
                 <Rocket /> Production URL
@@ -101,11 +99,39 @@ export function SettingsDialog({
               {isTestWebhook(draft.webhookUrl)
                 ? "Test mode needs you to click “Execute workflow” in n8n before each message."
                 : "Production mode needs the workflow to be Active in n8n."}
+              {" "}Leave empty to use server-side <code>N8N_WEBHOOK_URL</code>.
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="auth-token">Auth token (optional)</Label>
+            <Label>Basic authentication</Label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                aria-label="Basic auth username"
+                value={draft.basicAuthUsername}
+                onChange={(e) => setDraft({ ...draft, basicAuthUsername: e.target.value })}
+                placeholder="Username"
+                autoComplete="username"
+                className="font-mono text-xs"
+              />
+              <Input
+                aria-label="Basic auth password"
+                type="password"
+                value={draft.basicAuthPassword}
+                onChange={(e) => setDraft({ ...draft, basicAuthPassword: e.target.value })}
+                placeholder="Password"
+                autoComplete="current-password"
+                className="font-mono text-xs"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Sent as the <code>Authorization: Basic ...</code> request header.
+              {" "}Leave empty to use server-side credentials.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="auth-token">Bearer auth token (optional)</Label>
             <Input
               id="auth-token"
               value={draft.authToken}

@@ -1,6 +1,8 @@
 export type ChatSettings = {
   webhookUrl: string;
   authToken: string;
+  basicAuthUsername: string;
+  basicAuthPassword: string;
   /** Raw JSON object of extra request headers, e.g. {"x-api-key":"..."} */
   headersJson: string;
 };
@@ -13,8 +15,10 @@ export const DEFAULT_PROD_WEBHOOK =
 const KEY = "n8n-chat.settings.v1";
 
 export const defaultSettings: ChatSettings = {
-  webhookUrl: DEFAULT_TEST_WEBHOOK,
+  webhookUrl: "",
   authToken: "",
+  basicAuthUsername: "",
+  basicAuthPassword: "",
   headersJson: "",
 };
 
@@ -31,7 +35,9 @@ export function getSettings(): ChatSettings {
   if (cache) return cache;
   try {
     const raw = window.localStorage.getItem(KEY);
-    cache = raw ? { ...defaultSettings, ...(JSON.parse(raw) as Partial<ChatSettings>) } : defaultSettings;
+    cache = raw
+      ? { ...defaultSettings, ...(JSON.parse(raw) as Partial<ChatSettings>) }
+      : defaultSettings;
   } catch {
     cache = defaultSettings;
   }
@@ -66,6 +72,10 @@ export function parseExtraHeaders(settings: ChatSettings): Record<string, string
     headers["Authorization"] = settings.authToken.trim().toLowerCase().startsWith("bearer ")
       ? settings.authToken.trim()
       : `Bearer ${settings.authToken.trim()}`;
+  }
+  if (settings.basicAuthUsername || settings.basicAuthPassword) {
+    headers["Authorization"] =
+      `Basic ${btoa(`${settings.basicAuthUsername}:${settings.basicAuthPassword}`)}`;
   }
   return headers;
 }
